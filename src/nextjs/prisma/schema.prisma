@@ -28,7 +28,56 @@ model Recording {
   referenceUuid String?
   reference Reference? @relation(fields: [referenceUuid],references: [uuid])
 
+  // どのパイプラインバージョンで処理すべきか / 実際に処理し切ったか。
+  // ステージ構成やモデルは変わりうるので、再処理の要否を判断できるように追跡する。
+  targetPipelineVersion    String  // アップロード時に当時のCURRENT_PIPELINE_VERSIONをセット
+  processedPipelineVersion String? // 全ステージ完了時にセット
+
   segment Segment[]
+  job ProcessingJob?
+}
+
+/// Pythonワーカーが処理する録音1件ぶんのジョブ。
+/// NextJSがアップロード時にPENDINGで作成し、ワーカーがポーリング(FOR UPDATE SKIP LOCKED)して処理する。
+/// (src/README.md「各録音のパイプライン処理について」を参照)
+model ProcessingJob {
+  uuid String @id @default(uuid())
+
+  recordingUuid String @unique
+  recording Recording @relation(fields: [recordingUuid], references: [uuid], onDelete: Cascade)
+
+  status JobStatus @default(PENDING)
+
+  // このジョブ実行が採用したパイプラインバージョン(claim時に recording.targetPipelineVersion を採用)。
+  pipelineVersion String
+  // 直近に着手/完了したステージのID。ステージ構成はバージョンで変わりうるのでenumにはしない。
+  stage String?
+  // 各ステージの実行記録。どのステージをどのモデル/コードで処理したかを残す:
+  // [{ "stage": "segmentation", "processor": "inaSpeechSegmenter", "version": "0.8.0",
+  //    "status": "done", "startedAt": "...", "finishedAt": "...", "error": null }, ...]
+  stageRuns Json?
+
+  attempts    Int @default(0)
+  maxAttempts Int @default(3)
+  error       String? // 最後に失敗したときのメッセージ
+
+  // ワーカー間の排他制御用。claim時にセットする。
+  lockedBy String?   // ワーカーインスタンスの識別子
+  lockedAt DateTime?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  @@index([status])
+}
+
+enum JobStatus {
+  PENDING // 未着手
+  RUNNING // ワーカーが処理中
+  DONE    // 全ステージ完了
+  FAILED  // maxAttemptsを使い切って失敗
 }
 
 model Segment {
