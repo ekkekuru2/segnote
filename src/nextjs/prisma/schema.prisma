@@ -11,3 +11,98 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+
+model Recording {
+  uuid String @id @default(uuid())
+  id String  // for URL
+  teamUuid String
+  team Team @relation(fields:[teamUuid], references: [uuid])
+  @@unique([id,teamUuid])
+  title String  // for display
+
+  uploadDate DateTime
+  fileCreateDate DateTime
+  blobUrl String
+
+  referenceUuid String?
+  reference Reference? @relation(fields: [referenceUuid],references: [uuid])
+
+  segment Segment[]
+}
+
+model Segment {
+  id Int
+  recordingUuid String
+  recording Recording @relation(fields: [recordingUuid], references: [uuid])
+  @@id([id,recordingUuid])
+
+  type SegType
+  start Float // 秒
+  end Float // 秒
+
+  text String? //if type==SPEECH
+
+  referenceUuid String?  //if type==MUSIC
+  reference Reference? @relation(fields: [referenceUuid],references: [uuid])
+  refStart Float?  // 秒
+  refEnd Float?  // 秒
+
+}
+enum SegType {
+  SPEECH
+  MUSIC
+}
+
+model Reference {
+  uuid String @id @default(uuid())
+  teamUuid String
+  team Team @relation(fields:[teamUuid], references: [uuid])
+
+  title String
+
+  blobUrl String
+
+  status ReferenceStatus
+
+  recordings Recording[]
+  segments Segment[]
+}
+enum ReferenceStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+
+model Team {
+  uuid String @id @default(uuid())
+  id String @unique
+  name String
+  recordings Recording[]
+  references Reference[]
+
+  users UserTeam[]
+}
+model User {
+  uuid String @id @default(uuid())
+
+  teams UserTeam[]
+}
+
+model UserTeam {
+  teamUuid String
+  team Team @relation(fields: [teamUuid],references: [uuid])
+  userUuid String
+  user User @relation(fields: [userUuid],references: [uuid])
+
+  role UserTeamRole
+
+  @@id([teamUuid,userUuid])
+}
+
+enum UserTeamRole {
+  ADMIN
+  WRITE
+  READ
+}
+
