@@ -47,3 +47,6 @@ next-env.d.ts
 *.wav
 src/nextjs/public/mock
 
+# Uploaded recordings / references (local filesystem storage)
+/src/storage/
+
