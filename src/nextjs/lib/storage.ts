@@ -7,20 +7,33 @@ import path from "node:path";
 // 現時点ではローカルファイルシステムに保存する枠組み。NextJS と Python ワーカーが
 // 同じディレクトリを共有できることが前提(同一ホスト or 共有ボリューム)。
 // 将来 S3 等のオブジェクトストレージに差し替える場合は、この層だけ置き換えればよい。
-// worker 側の worker/storage.py も同じ既定値/環境変数を参照する。
-export const STORAGE_DIR =
-  process.env.SEGNOTE_STORAGE_DIR ??
-  path.resolve(process.cwd(), "..", "storage");
+// worker 側の config.py も同じ既定値/環境変数(SEGNOTE_STORAGE_DIR)を参照する。
+//
+// 実行時に解決する(トップレベルで process.cwd() を呼ぶとビルド時のファイルトレースが
+// プロジェクト全体に広がって警告になるため)。
+export function storageDir(): string {
+  // NextJS と worker が同じ場所を指す必要があるため、保存先は環境変数で明示する。
+  // (dev では .env に SEGNOTE_STORAGE_DIR=<repo>/src/storage を設定済み)
+  const dir = process.env.SEGNOTE_STORAGE_DIR;
+  if (!dir) {
+    throw new Error(
+      "SEGNOTE_STORAGE_DIR is not set. worker と共有するストレージのパス" +
+        "(例: <repo>/src/storage)を指定してください。",
+    );
+  }
+  return dir;
+}
 
 /** ストレージキー(例: "recordings/<uuid>/original.wav")を実体パスに解決する。 */
 export function resolveStoragePath(key: string): string {
-  // 先頭スラッシュや ".." による STORAGE_DIR 外への脱出を防ぐ。
+  const base = storageDir();
+  // 先頭スラッシュや ".." による base 外への脱出を防ぐ。
   const normalized = path
     .normalize(key)
     .replace(/^(\.\.(\/|\\|$))+/, "")
     .replace(/^[/\\]+/, "");
-  const full = path.resolve(STORAGE_DIR, normalized);
-  if (full !== STORAGE_DIR && !full.startsWith(STORAGE_DIR + path.sep)) {
+  const full = path.resolve(base, normalized);
+  if (full !== base && !full.startsWith(base + path.sep)) {
     throw new Error(`Invalid storage key: ${key}`);
   }
   return full;
