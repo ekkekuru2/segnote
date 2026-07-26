@@ -1,36 +1,39 @@
-from inaSpeechSegmenter import Segmenter
+"""ステージ1: inaSpeechSegmenter による区間分割。
 
-import os
-import sys
-import json
+音声/動画全体を speech(発話) / music(演奏) / それ以外(noise, noEnergy) に分ける。
+inaSpeechSegmenter は内部で ffmpeg を使うため、動画ファイルを渡しても音声を抽出して処理する。
+"""
 
+from __future__ import annotations
 
-input_file = os.path.abspath(sys.argv[1])
+from typing import Any
 
-# 'smn' は入力信号を音声区間(speeech)、音楽区間(music)、ノイズ区間(noise)にラベル付けする
-# detect_genderをTrueにすると、男性(male) / 女性(female)のラベルに細分化されるが、処理速度は遅くなる
-# batch_size: default value (32) is slow, but works on any hardware
-seg = Segmenter(vad_engine='smn', detect_gender=False, batch_size=32)
-
-
-segs = seg(input_file)
-# ('区間ラベル',  区間開始時刻（秒）,  区間終了時刻（秒）)というタプルのリスト
-
-segs_format =[]
-for seg in segs:
-    s = {
-        "type" : seg[0],
-        "start" : seg[1],
-        "end" : seg[2]
-    }
-    segs_format.append(s)
-output ={
-    "id":"id",
-    "audio_url":"url",
-    "segments":segs_format
+# inaSpeechSegmenter が返すラベル -> Segment.type(schema.prisma の SegType)。
+# noise / noEnergy などはここでは Segment に落とさない(必要になったら拡張)。
+_LABEL_TO_TYPE = {
+    "speech": "SPEECH",
+    "music": "MUSIC",
 }
-# JSONファイルに書き込む
-with open('output.json', 'w', encoding='utf-8') as fp:
-    json.dump(output, fp, ensure_ascii=False, indent=4)
+
+PROCESSOR_NAME = "inaSpeechSegmenter"
 
 
+def segment(audio_path: str) -> list[dict[str, Any]]:
+    """音声/動画ファイルを区間分割し、[{type, start, end}, ...] を返す。
+
+    type は 'SPEECH' | 'MUSIC'。start/end は秒。
+    """
+    # tensorflow を伴う重い import なので、呼ばれたときだけ読み込む。
+    from inaSpeechSegmenter import Segmenter
+
+    # 'smn': speech / music / noise にラベル付け。detect_gender=False で高速側。
+    segmenter = Segmenter(vad_engine="smn", detect_gender=False, batch_size=32)
+    raw = segmenter(audio_path)  # [('label', start, end), ...]
+
+    segments: list[dict[str, Any]] = []
+    for label, start, end in raw:
+        seg_type = _LABEL_TO_TYPE.get(label)
+        if seg_type is None:
+            continue
+        segments.append({"type": seg_type, "start": float(start), "end": float(end)})
+    return segments

@@ -50,3 +50,7 @@ src/nextjs/public/mock
 # Uploaded recordings / references (local filesystem storage)
 /src/storage/
 
+
+# Python bytecode
+__pycache__/
+*.pyc
