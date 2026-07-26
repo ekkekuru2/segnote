@@ -1,6 +1,9 @@
-import { createReadStream } from "node:fs";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 // アップロードされた音声/動画ファイルの実体を置く場所。
 //
@@ -50,18 +53,26 @@ export function sanitizeFilename(name: string): string {
   return cleaned.length > 0 ? cleaned.slice(0, 200) : "upload";
 }
 
-/** アップロードされた File をストレージに保存し、保存したキーを返す。 */
-export async function saveUploadedFile(
+/**
+ * アップロードされたファイルのボディ(ReadableStream)をストレージへ逐次書き込む。
+ * 数十分〜数時間の録音は数百MB〜GBになりうるので、全体をメモリに載せず流し込む。
+ * 保存したキーとバイト数を返す。
+ */
+export async function saveUploadedStream(
   recordingUuid: string,
-  file: File,
-): Promise<string> {
-  const filename = sanitizeFilename(file.name || "upload");
-  const key = path.posix.join("recordings", recordingUuid, filename);
+  filename: string,
+  body: ReadableStream<Uint8Array>,
+): Promise<{ key: string; size: number }> {
+  const safe = sanitizeFilename(filename || "upload");
+  const key = path.posix.join("recordings", recordingUuid, safe);
   const dest = resolveStoragePath(key);
   await mkdir(path.dirname(dest), { recursive: true });
-  const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(dest, buffer);
-  return key;
+  await pipeline(
+    Readable.fromWeb(body as NodeReadableStream<Uint8Array>),
+    createWriteStream(dest),
+  );
+  const info = await stat(dest);
+  return { key, size: info.size };
 }
 
 /** ストレージ上のファイルを読み出すための ReadStream とサイズを返す(配信用)。 */
